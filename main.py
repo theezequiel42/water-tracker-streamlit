@@ -1,68 +1,35 @@
 import streamlit as st
 import pandas as pd
 import os
-import gdown
 import matplotlib.pyplot as plt
-from urllib.parse import quote_plus
-import io
-from datetime import datetime
+from dotenv import load_dotenv
 
-# Definir o idioma como pt-BR usando o atributo lang
-st.markdown("""
-    <html lang="pt-br">
-    <meta http-equiv="Content-Language" content="pt-br">
-    <style>
-        html {
-            font-family: 'Arial', sans-serif;
-        }
-        body {
-            background-color: #f5f5f5;
-            color: #333;
-            font-size: 16px;
-            margin: 0;
-            padding: 0;
-        }
-        .logo {
-            width: 200px;  /* Ajuste do tamanho do logo */
-            margin-left: auto;
-            margin-right: auto;
-            display: block; /* Garante centralização */
-        }
-        .stButton>button {
-            background-color: #4CAF50; 
-            color: white; 
-            border: none;
-            padding: 10px 20px;
-            font-size: 16px;
-            border-radius: 5px;
-        }
-        .stButton>button:hover {
-            background-color: #45a049;
-        }
-        .stTitle {
-            font-size: 36px;
-            font-weight: bold;
-            color: #2e7d32;
-        }
-        .stMarkdown {
-            font-size: 18px;
-        }
-    </style>
-""", unsafe_allow_html=True)
+# Carregar variáveis do arquivo .env
+load_dotenv()
 
-# Exibir o logo centralizado usando st.columns
-col1, col2, col3 = st.columns([1, 4, 1])  # Dividindo a página em 3 partes
+# Obter a URL segura da planilha do Google Sheets
+sheet_url = os.getenv("SHEET_URL")
+
+# Garantir que a URL foi carregada corretamente
+if not sheet_url:
+    st.error("Erro: URL da planilha não encontrada. Verifique o arquivo .env")
+    st.stop()
+
+# Carregar os dados diretamente do Google Sheets com o cabeçalho correto
+df = pd.read_csv(sheet_url, dtype=str, header=0)  # header=0 garante que a primeira linha é o cabeçalho
+
+# Remover espaços extras dos nomes das colunas
+df.columns = df.columns.str.strip()
+
+# Verificar se a coluna "Nome" realmente existe após a limpeza
+if "Nome" not in df.columns:
+    st.error("Erro: A coluna 'Nome' ainda não foi encontrada após a limpeza. Verifique o cabeçalho na planilha!")
+    st.stop()
+
+# Centralizar o logo
+col1, col2, col3 = st.columns([1, 4, 1])
 with col2:
-    st.image("images/logo.png", width=200)  # Exibindo o logo com a largura ajustada
-
-# Baixar a planilha do Google Drive
-url = 'https://docs.google.com/spreadsheets/d/1UdM-Mew0af_fmyNXQpYvC3z4rZTYrWHph8SrcI60plU/export?format=xlsx'
-output = 'dados.xlsx'
-gdown.download(url, output, quiet=False)
-
-# Carregar a planilha
-df = pd.read_excel('dados.xlsx')
-
+    st.image("images/logo.png", width=200)
 
 # Adicionar título e descrição
 st.title("Consulta de Consumo e Pagamento")
@@ -82,96 +49,60 @@ mes_selecionado = st.selectbox("Selecione o mês", meses)
 
 # Função para filtrar os dados com base no nome e no mês
 def filtrar_dados(nome, mes):
-    if mes == 'Janeiro 2025':
-        coluna_consumo = 'Consumo Janeiro 2025 (m³)'
-        coluna_valor = 'Valor Janeiro 2025 (R$)'
-    elif mes == 'Fevereiro 2025':
-        coluna_consumo = 'Consumo Fevereiro 2025 (m³)'
-        coluna_valor = 'Valor Fevereiro 2025 (R$)'
-    elif mes == 'Março 2025':
-        coluna_consumo = 'Consumo Março 2025 (m³)'
-        coluna_valor = 'Valor Março 2025 (R$)'
-    elif mes == 'Abril 2025':
-        coluna_consumo = 'Consumo Abril 2025 (m³)'
-        coluna_valor = 'Valor Abril 2025 (R$)'
-    elif mes == 'Maio 2025':
-        coluna_consumo = 'Consumo Maio 2025 (m³)'
-        coluna_valor = 'Valor Maio 2025 (R$)'
-    elif mes == 'Junho 2025':
-        coluna_consumo = 'Consumo Junho 2025 (m³)'
-        coluna_valor = 'Valor Junho 2025 (R$)'
-    elif mes == 'Julho 2025':
-        coluna_consumo = 'Consumo Julho 2025 (m³)'
-        coluna_valor = 'Valor Julho 2025 (R$)'
-    elif mes == 'Agosto 2025':
-        coluna_consumo = 'Consumo Agosto 2025 (m³)'
-        coluna_valor = 'Valor Agosto 2025 (R$)'
-    elif mes == 'Setembro 2025':
-        coluna_consumo = 'Consumo Setembro 2025 (m³)'
-        coluna_valor = 'Valor Setembro 2025 (R$)'
-    elif mes == 'Outubro 2025':
-        coluna_consumo = 'Consumo Outubro 2025 (m³)'
-        coluna_valor = 'Valor Outubro 2025 (R$)'
-    elif mes == 'Novembro 2025':
-        coluna_consumo = 'Consumo Novembro 2025 (m³)'
-        coluna_valor = 'Valor Novembro 2025 (R$)'
-    elif mes == 'Dezembro 2025':
-        coluna_consumo = 'Consumo Dezembro 2025 (m³)'
-        coluna_valor = 'Valor Dezembro 2025 (R$)'
+    coluna_consumo = f"Consumo {mes} (m³)"
+    coluna_valor = f"Valor {mes} (R$)"
 
-    # Filtrar os dados
+    # Filtrar os dados para o usuário selecionado
     dados_usuario = df[df['Nome'] == nome][['Nome', coluna_consumo, coluna_valor, 'Valor em Atraso (R$)']]
-    
-    # Retornar tanto as colunas como os dados
+
     return dados_usuario, coluna_consumo, coluna_valor
 
 # Filtrar os dados com base no nome e mês
 dados_usuario, coluna_consumo, coluna_valor = filtrar_dados(usuario_selecionado, mes_selecionado)
 
-# Acessar os valores diretamente pelas colunas
-consumo = dados_usuario[coluna_consumo].iloc[0]
-valor = dados_usuario[coluna_valor].iloc[0]
-valor_atraso = dados_usuario['Valor em Atraso (R$)'].iloc[0]
+# Verificar se há dados para exibição
+if not dados_usuario.empty:
+    consumo = dados_usuario[coluna_consumo].iloc[0]
+    valor = dados_usuario[coluna_valor].iloc[0]
+    valor_atraso = dados_usuario['Valor em Atraso (R$)'].iloc[0]
 
-# Função para converter valores em string para float (verificando se o valor é string ou número)
-def converter_valor(valor):
-    # Se o valor já for numérico (int ou float), retornamos diretamente
-    if isinstance(valor, (int, float)):
-        return float(valor)
-    # Se for string (ex: "R$ 10,00"), removemos os caracteres e convertemos para float
-    elif isinstance(valor, str):
-        valor_str = valor.replace('R$', '').replace('.', '').replace(',', '.')
-        return float(valor_str)
-    else:
-        # Caso o valor não seja string nem número, apenas retorna 0
+    # Converter valores para números (removendo "R$" e formatando corretamente)
+    def converter_valor(valor):
+        if isinstance(valor, (int, float)):
+            return float(valor)
+        elif isinstance(valor, str):
+            valor_str = valor.replace('R$', '').replace('.', '').replace(',', '.')
+            return float(valor_str) if valor_str.strip() else 0.0
         return 0.0
 
-# Exibir consumo e valor
-if consumo <= 0:
-    st.write("Consumo: Indisponível")
+    # Exibir consumo e valor
+    if float(consumo) <= 0:
+        st.write("Consumo: Indisponível")
+    else:
+        st.write(f"**Consumo:** {consumo} m³")
+        st.write(f"**Valor a pagar:** {valor}")
+
+    # Exibir valor em atraso
+    st.write(f"**Valor em Atraso:** {valor_atraso}")
+
+    # Gerar dados para gráficos de todos os meses do ano para o usuário
+    valores = []
+    for mes in meses:
+        dados_usuario, coluna_consumo, coluna_valor = filtrar_dados(usuario_selecionado, mes)
+        valores.append(converter_valor(dados_usuario[coluna_valor].iloc[0]))
+
+    # Adicionar gráfico de barras para consumo
+    fig, ax = plt.subplots()
+    ax.bar(range(len(meses)), valores)  # Adicionando os valores corretamente
+
+    # Garantir que os rótulos correspondam corretamente aos ticks
+    ax.set_xticks(range(len(meses)))  # Define os ticks corretamente
+    ax.set_xticklabels(meses, rotation=45, ha='right')
+
+    ax.set_xlabel('Meses')
+    ax.set_ylabel('Valor (R$)')
+    ax.set_title('Valor a Pagar por Mês')
+    st.pyplot(fig)
+
 else:
-    st.write(f"Consumo: {consumo} m³")
-    st.write(f"Valor a pagar: {valor}")
-
-# Exibir valor em atraso
-st.write(f"Valor em Atraso: {valor_atraso}")
-
-# Gerar dados para gráficos de todos os meses do ano para o usuário
-valores = []
-for mes in meses:
-    dados_usuario, coluna_consumo, coluna_valor = filtrar_dados(usuario_selecionado, mes)
-    valores.append(converter_valor(dados_usuario[coluna_valor].iloc[0]))
-
-# Adicionar gráfico de barras para consumo
-fig, ax = plt.subplots()
-ax.bar(meses, valores)
-
-# Quebrar o texto das legendas no eixo X
-ax.set_xticklabels(meses, rotation=45, ha='right')  # Ajustar o ângulo para melhorar a leitura
-ax.set_xlabel('Meses')
-ax.set_ylabel('Valor (R$)')
-ax.set_title('Valor a Pagar por Mês')
-st.pyplot(fig)
-
-# Remover a planilha
-os.remove('dados.xlsx')
+    st.warning("Nenhum dado encontrado para este usuário e mês selecionados.")
