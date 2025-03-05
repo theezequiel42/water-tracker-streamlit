@@ -3,6 +3,7 @@ import pandas as pd
 import os
 import matplotlib.pyplot as plt
 from dotenv import load_dotenv
+from datetime import datetime
 
 # Carregar variáveis do arquivo .env
 load_dotenv()
@@ -35,17 +36,24 @@ with col2:
 st.title("Consulta de Consumo e Pagamento")
 st.markdown("**Selecione seu nome e o mês para visualizar o consumo, valor a pagar e o valor em atraso.**")
 
-# Listar os nomes dos usuários
-nomes = df['Nome'].unique()
-usuario_selecionado = st.selectbox("Selecione seu nome", nomes)
-
 # Listar os meses para seleção
 meses = [
     'Janeiro 2025', 'Fevereiro 2025', 'Março 2025',
     'Abril 2025', 'Maio 2025', 'Junho 2025', 'Julho 2025', 'Agosto 2025',
     'Setembro 2025', 'Outubro 2025', 'Novembro 2025', 'Dezembro 2025'
 ]
-mes_selecionado = st.selectbox("Selecione o mês", meses)
+
+# Determinar o mês anterior ao atual
+mes_atual = datetime.now().month
+mes_anterior = mes_atual - 1 if mes_atual > 1 else 12  # Se for janeiro, retorna dezembro
+mes_selecionado_padrao = meses[mes_anterior - 1]  # Índice começa em 0
+
+# Listar os nomes dos usuários
+nomes = df['Nome'].unique()
+usuario_selecionado = st.selectbox("Selecione seu nome", nomes)
+
+# Seleção do mês, com o mês anterior ao atual como padrão
+mes_selecionado = st.selectbox("Selecione o mês", meses, index=mes_anterior - 1)
 
 # Função para filtrar os dados com base no nome e no mês
 def filtrar_dados(nome, mes):
