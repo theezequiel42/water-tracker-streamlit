@@ -83,14 +83,22 @@ if not dados_usuario.empty:
             return float(valor_str) if valor_str.strip() else 0.0
         return 0.0
 
-    # Exibir consumo e valor
-    if float(consumo) <= 0:
-        st.write("Consumo: Indisponível")
+    # Tenta converter o consumo para float com segurança
+    try:
+        consumo_float = float(consumo)
+    except (ValueError, TypeError):
+        consumo_float = -1  # valor inválido ou ausente será tratado como indisponível
+
+    # Condições de exibição
+    if consumo_float < 0:
+        st.write("**Consumo:** Indisponível")
+    elif consumo_float == 0:
+        st.write("**Consumo:** Inferior a 1 m³")
     else:
         st.write(f"**Consumo:** {consumo} m³")
-        st.write(f"**Valor a pagar:** {valor}")
 
-    # Exibir valor em atraso
+    # Sempre exibir o valor a pagar e o valor em atraso
+    st.write(f"**Valor a pagar:** {valor}")
     st.write(f"**Valor em Atraso:** {valor_atraso}")
 
     # Gerar dados para gráficos de todos os meses do ano para o usuário
