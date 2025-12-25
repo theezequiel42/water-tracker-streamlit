@@ -1,30 +1,137 @@
-import streamlit as st
-import pandas as pd
 import os
-import matplotlib.pyplot as plt
-from dotenv import load_dotenv
+import re
+import unicodedata
 from datetime import datetime
 
-# Carregar variáveis do arquivo .env
-load_dotenv()
+import pandas as pd
+import streamlit as st
+import altair as alt
+from dotenv import load_dotenv
 
-# Obter a URL segura da planilha do Google Sheets
+
+def _normalize_text(text: str) -> str:
+    """Normaliza texto para comparações flexíveis (sem acentos/maiúsculas)."""
+    if not isinstance(text, str):
+        return ""
+    normalized = unicodedata.normalize("NFKD", text)
+    normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized.strip().lower()
+
+
+MESES_PT = {
+    "janeiro": 1,
+    "fevereiro": 2,
+    "marco": 3,
+    "março": 3,
+    "abril": 4,
+    "maio": 5,
+    "junho": 6,
+    "julho": 7,
+    "agosto": 8,
+    "setembro": 9,
+    "outubro": 10,
+    "novembro": 11,
+    "dezembro": 12,
+}
+
+
+def _extrair_mes_ano(label: str) -> tuple[int | None, int | None]:
+    tokens = _normalize_text(label).replace("/", " ").split()
+    mes_num = next((MESES_PT[token] for token in tokens if token in MESES_PT), None)
+    ano = next((int(token) for token in tokens if re.fullmatch(r"\d{4}", token)), None)
+    return mes_num, ano
+
+
+def _preparar_meses(df: pd.DataFrame) -> list[dict]:
+    meses_info: dict[str, dict] = {}
+    for col in df.columns:
+        coluna_limpa = col.strip()
+        match_consumo = re.match(r"(?i)^consumo\s+(.*?)\s*(?:\(|$)", coluna_limpa)
+        match_valor = re.match(r"(?i)^valor\s+(?!em\s+atraso)(.*?)\s*(?:\(|$)", coluna_limpa)
+
+        if match_consumo:
+            label = match_consumo.group(1).strip()
+            chave = _normalize_text(label)
+            meses_info.setdefault(chave, {"label": label})["consumo_col"] = coluna_limpa
+
+        if match_valor:
+            label = match_valor.group(1).strip()
+            chave = _normalize_text(label)
+            meses_info.setdefault(chave, {"label": label})["valor_col"] = coluna_limpa
+
+    meses_validos: list[dict] = []
+    for chave, info in meses_info.items():
+        if "consumo_col" not in info or "valor_col" not in info:
+            continue
+        mes_num, ano = _extrair_mes_ano(info["label"])
+        meses_validos.append(
+            {
+                "key": chave,
+                "label": info["label"],
+                "consumo_col": info["consumo_col"],
+                "valor_col": info["valor_col"],
+                "mes_num": mes_num,
+                "ano": ano,
+            }
+        )
+
+    meses_validos.sort(
+        key=lambda m: (
+            m["ano"] if m["ano"] is not None else 0,
+            m["mes_num"] if m["mes_num"] is not None else 0,
+            m["label"],
+        )
+    )
+    return meses_validos
+
+
+def _escolher_mes_padrao(meses_validos: list[dict]) -> str:
+    hoje = datetime.now()
+    alvo_mes = hoje.month - 1 if hoje.month > 1 else 12
+    alvo_ano = hoje.year if hoje.month > 1 else hoje.year - 1
+
+    for mes in meses_validos:
+        if mes["mes_num"] == alvo_mes and (mes["ano"] == alvo_ano or mes["ano"] is None):
+            return mes["key"]
+    return meses_validos[-1]["key"] if meses_validos else ""
+
+
+def converter_valor(valor) -> float:
+    if isinstance(valor, (int, float)):
+        return float(valor)
+    if isinstance(valor, str):
+        valor_str = valor.replace("R$", "").replace(".", "").replace(",", ".")
+        return float(valor_str) if valor_str.strip() else 0.0
+    return 0.0
+
+
+load_dotenv()
 sheet_url = os.getenv("SHEET_URL")
 
-# Garantir que a URL foi carregada corretamente
 if not sheet_url:
-    st.error("Erro: URL da planilha não encontrada. Verifique o arquivo .env")
+    st.error("Erro: URL da planilha não encontrada. Verifique o arquivo .env.")
     st.stop()
 
-# Carregar os dados diretamente do Google Sheets com o cabeçalho correto
-df = pd.read_csv(sheet_url, dtype=str, header=0)  # header=0 garante que a primeira linha é o cabeçalho
+try:
+    df = pd.read_csv(sheet_url, dtype=str, header=0)
+except Exception as exc:
+    st.error(f"Erro ao carregar a planilha: {exc}")
+    st.stop()
 
-# Remover espaços extras dos nomes das colunas
 df.columns = df.columns.str.strip()
 
-# Verificar se a coluna "Nome" realmente existe após a limpeza
 if "Nome" not in df.columns:
-    st.error("Erro: A coluna 'Nome' ainda não foi encontrada após a limpeza. Verifique o cabeçalho na planilha!")
+    st.error("Erro: A coluna 'Nome' não foi encontrada. Verifique o cabeçalho na planilha.")
+    st.stop()
+
+coluna_atraso = next((c for c in df.columns if _normalize_text(c).startswith("valor em atraso")), None)
+if not coluna_atraso:
+    st.warning("Coluna de atraso não encontrada na planilha. Valores em atraso não serão exibidos.")
+
+meses_disponiveis = _preparar_meses(df)
+if not meses_disponiveis:
+    st.error("Não foi possível identificar colunas de consumo e valor por mês na planilha.")
     st.stop()
 
 # Centralizar o logo
@@ -32,64 +139,47 @@ col1, col2, col3 = st.columns([1, 4, 1])
 with col2:
     st.image("images/logo.png", width=200)
 
-# Adicionar título e descrição
 st.title("Consulta de Consumo e Pagamento")
 st.markdown("**Selecione seu nome e o mês para visualizar o consumo, valor a pagar e o valor em atraso.**")
 
-# Listar os meses para seleção
-meses = [
-    'Janeiro 2025', 'Fevereiro 2025', 'Março 2025',
-    'Abril 2025', 'Maio 2025', 'Junho 2025', 'Julho 2025', 'Agosto 2025',
-    'Setembro 2025', 'Outubro 2025', 'Novembro 2025', 'Dezembro 2025'
-]
-
-# Determinar o mês anterior ao atual
-mes_atual = datetime.now().month
-mes_anterior = mes_atual - 1 if mes_atual > 1 else 12  # Se for janeiro, retorna dezembro
-mes_selecionado_padrao = meses[mes_anterior - 1]  # Índice começa em 0
-
-# Listar os nomes dos usuários
-nomes = df['Nome'].unique()
+nomes = df["Nome"].dropna().unique()
 usuario_selecionado = st.selectbox("Selecione seu nome", nomes)
 
-# Seleção do mês, com o mês anterior ao atual como padrão
-mes_selecionado = st.selectbox("Selecione o mês", meses, index=mes_anterior - 1)
+padrao_key = _escolher_mes_padrao(meses_disponiveis)
+indice_padrao = (
+    next((i for i, mes in enumerate(meses_disponiveis) if mes["key"] == padrao_key), 0)
+    if meses_disponiveis
+    else 0
+)
+mes_selecionado = st.selectbox(
+    "Selecione o mês",
+    meses_disponiveis,
+    index=indice_padrao,
+    format_func=lambda mes: mes["label"],
+)
 
-# Função para filtrar os dados com base no nome e no mês
-def filtrar_dados(nome, mes):
-    coluna_consumo = f"Consumo {mes} (m³)"
-    coluna_valor = f"Valor {mes} (R$)"
 
-    # Filtrar os dados para o usuário selecionado
-    dados_usuario = df[df['Nome'] == nome][['Nome', coluna_consumo, coluna_valor, 'Valor em Atraso (R$)']]
+def filtrar_dados(nome: str, mes_info: dict) -> pd.DataFrame:
+    colunas = ["Nome"]
+    for col in (mes_info["consumo_col"], mes_info["valor_col"], coluna_atraso):
+        if col and col in df.columns:
+            colunas.append(col)
+    return df[df["Nome"] == nome][colunas]
 
-    return dados_usuario, coluna_consumo, coluna_valor
 
-# Filtrar os dados com base no nome e mês
-dados_usuario, coluna_consumo, coluna_valor = filtrar_dados(usuario_selecionado, mes_selecionado)
+dados_usuario = filtrar_dados(usuario_selecionado, mes_selecionado)
 
-# Verificar se há dados para exibição
 if not dados_usuario.empty:
-    consumo = dados_usuario[coluna_consumo].iloc[0]
-    valor = dados_usuario[coluna_valor].iloc[0]
-    valor_atraso = dados_usuario['Valor em Atraso (R$)'].iloc[0]
+    linha = dados_usuario.iloc[0]
+    consumo = linha.get(mes_selecionado["consumo_col"], "")
+    valor = linha.get(mes_selecionado["valor_col"], "")
+    valor_atraso = linha.get(coluna_atraso, "Indisponível") if coluna_atraso else "Indisponível"
 
-    # Converter valores para números (removendo "R$" e formatando corretamente)
-    def converter_valor(valor):
-        if isinstance(valor, (int, float)):
-            return float(valor)
-        elif isinstance(valor, str):
-            valor_str = valor.replace('R$', '').replace('.', '').replace(',', '.')
-            return float(valor_str) if valor_str.strip() else 0.0
-        return 0.0
-
-    # Tenta converter o consumo para float com segurança
     try:
         consumo_float = float(consumo)
     except (ValueError, TypeError):
-        consumo_float = -1  # valor inválido ou ausente será tratado como indisponível
+        consumo_float = -1
 
-    # Condições de exibição
     if consumo_float < 0:
         st.write("**Consumo:** Indisponível")
     elif consumo_float == 0:
@@ -97,28 +187,36 @@ if not dados_usuario.empty:
     else:
         st.write(f"**Consumo:** {consumo} m³")
 
-    # Sempre exibir o valor a pagar e o valor em atraso
     st.write(f"**Valor a pagar:** {valor}")
-    st.write(f"**Valor em Atraso:** {valor_atraso}")
+    if coluna_atraso:
+        st.write(f"**Valor em Atraso:** {valor_atraso}")
 
-    # Gerar dados para gráficos de todos os meses do ano para o usuário
     valores = []
-    for mes in meses:
-        dados_usuario, coluna_consumo, coluna_valor = filtrar_dados(usuario_selecionado, mes)
-        valores.append(converter_valor(dados_usuario[coluna_valor].iloc[0]))
+    for mes in meses_disponiveis:
+        dados_mes = filtrar_dados(usuario_selecionado, mes)
+        if dados_mes.empty or mes["valor_col"] not in dados_mes:
+            valores.append(0.0)
+            continue
+        valores.append(converter_valor(dados_mes[mes["valor_col"]].iloc[0]))
 
-    # Adicionar gráfico de barras para consumo
-    fig, ax = plt.subplots()
-    ax.bar(range(len(meses)), valores)  # Adicionando os valores corretamente
+    df_plot = pd.DataFrame(
+        {
+            "Mes": [mes["label"] for mes in meses_disponiveis],
+            "Valor": valores,
+        }
+    )
 
-    # Garantir que os rótulos correspondam corretamente aos ticks
-    ax.set_xticks(range(len(meses)))  # Define os ticks corretamente
-    ax.set_xticklabels(meses, rotation=45, ha='right')
+    chart = (
+        alt.Chart(df_plot)
+        .mark_bar()
+        .encode(
+            x=alt.X("Mes:N", sort=None, axis=alt.Axis(labelAngle=-45, title="Meses")),
+            y=alt.Y("Valor:Q", title="Valor (R$)"),
+            tooltip=["Mes", alt.Tooltip("Valor:Q", format=".2f")],
+        )
+        .properties(title="Valor a Pagar por Mês")
+    )
 
-    ax.set_xlabel('Meses')
-    ax.set_ylabel('Valor (R$)')
-    ax.set_title('Valor a Pagar por Mês')
-    st.pyplot(fig)
-
+    st.altair_chart(chart, width="stretch")
 else:
     st.warning("Nenhum dado encontrado para este usuário e mês selecionados.")
